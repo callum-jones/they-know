@@ -1,0 +1,641 @@
+<title>Catch &amp; Dodge</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+  /* Single deliberate look (a grey-box game screen), so no dark/light swap. */
+  :root {
+    color-scheme: light;
+    --page: #c9ced6;
+    --stage: #e4e7ec;
+    --grid: rgba(31, 42, 55, 0.07);
+    --ink: #1f2a37;
+    --ink-soft: #5a6676;
+    --good: #2f9e6e;
+    --bonus: #f2b632;
+    --bad: #d64933;
+    --paper: #f7f8fa;
+    --display: "Bricolage Grotesque", "Arial Rounded MT Bold", "Helvetica Neue", Arial, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: var(--display);
+    box-sizing: border-box;
+    padding-inline: 16px;
+    padding-block: 16px;
+    display: flex;
+    justify-content: center;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .stage {
+    position: relative;
+    width: 100%;
+    max-width: 480px;
+    height: 100%;
+    max-height: 860px;
+    border-radius: 20px;
+    overflow: hidden;
+    background-color: var(--stage);
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 24px 24px;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.6) inset, 0 18px 40px -18px rgba(31,42,55,0.45);
+    touch-action: none;
+  }
+  canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; cursor: grab; }
+
+  /* HUD */
+  .hud {
+    position: absolute; inset: 0 0 auto 0;
+    padding: 14px 16px 0;
+    display: flex; flex-direction: column; gap: 12px;
+    pointer-events: none;
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+  }
+  .hud-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .timer { font-size: 18px; font-weight: 700; }
+  .lives { display: flex; gap: 4px; }
+  .life { width: 12px; height: 12px; border-radius: 50%; background: var(--ink); transition: background .2s, transform .2s; }
+  .life.lost { background: transparent; box-shadow: inset 0 0 0 2px var(--ink-soft); transform: scale(.8); }
+
+  /* Phrase slots */
+  .slots { display: flex; justify-content: center; gap: 5px; flex-wrap: nowrap; }
+  .slot {
+    width: clamp(26px, 8.5vw, 38px);
+    aspect-ratio: 5 / 6;
+    max-width: 100%;
+    border-radius: 7px;
+    display: grid; place-items: center;
+    font-family: var(--display); font-weight: 800;
+    font-size: clamp(16px, 5vw, 22px);
+    color: rgba(31,42,55,0.22);
+    box-shadow: inset 0 0 0 2px rgba(31,42,55,0.18);
+    transition: background .15s, color .15s, box-shadow .15s;
+  }
+  .slot.gap { width: 10px; box-shadow: none; }
+  .slot.got { background: var(--ink); color: var(--paper); box-shadow: none; animation: pop .35s ease-out; }
+  .slots.done .slot.got { background: var(--good); }
+  @keyframes pop { 0% { transform: scale(1.35); } 100% { transform: scale(1); } }
+  @media (prefers-reduced-motion: reduce) { .slot.got { animation: none; } }
+
+  /* Overlays */
+  .overlay {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+    background: rgba(201, 206, 214, 0.72);
+    -webkit-backdrop-filter: blur(3px);
+    backdrop-filter: blur(3px);
+  }
+  .card {
+    width: 100%; max-width: 360px;
+    background: var(--paper);
+    border-radius: 16px;
+    padding: 24px 22px 22px;
+    display: flex; flex-direction: column; gap: 14px;
+    box-shadow: 0 12px 30px -12px rgba(31,42,55,0.5);
+    user-select: text; -webkit-user-select: text;
+  }
+  .eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-soft); }
+  h1, h2 { margin: 0; font-weight: 800; line-height: .95; text-wrap: balance; letter-spacing: -0.02em; }
+  h1 { font-size: 44px; }
+  h2 { font-size: 34px; }
+  p { margin: 0; font-size: 15px; line-height: 1.45; color: var(--ink-soft); font-weight: 500; }
+  p strong { color: var(--ink); }
+  .legend { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .legend li { display: grid; grid-template-columns: 28px 1fr auto; align-items: center; gap: 10px; font-size: 15px; font-weight: 500; }
+  .legend span:last-child { font-family: var(--mono); font-size: 13px; font-weight: 700; }
+  .legend .neg { color: var(--bad); }
+  .keys { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); }
+  button, .input { font: inherit; border-radius: 10px; border: 0; }
+  .btn {
+    font-family: var(--display); font-weight: 800; font-size: 18px;
+    padding: 14px 18px;
+    background: var(--ink); color: var(--paper);
+    cursor: pointer;
+    transition: transform .1s;
+  }
+  .btn:active { transform: scale(.98); }
+  .btn.ghost { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 2px var(--ink); font-size: 16px; padding: 12px 18px; }
+  .btn:focus-visible, .input:focus-visible { outline: 3px solid var(--bonus); outline-offset: 2px; }
+  .phrase-big { font-weight: 800; font-size: 46px; line-height: .9; letter-spacing: -0.02em; }
+  .big { font-family: var(--mono); font-weight: 700; font-size: 44px; line-height: 1; font-variant-numeric: tabular-nums; }
+  form { display: flex; flex-direction: column; gap: 10px; }
+  .input {
+    padding: 13px 14px; font-size: 16px; font-family: var(--display); font-weight: 500;
+    background: #fff; color: var(--ink);
+    box-shadow: inset 0 0 0 2px rgba(31,42,55,0.2);
+  }
+  .err { color: var(--bad); font-size: 13px; }
+  .note { font-family: var(--mono); font-size: 11px; color: var(--ink-soft); line-height: 1.5; }
+</style>
+
+<div class="stage" id="stage">
+  <canvas id="cv" aria-label="Catch and Dodge game area"></canvas>
+
+  <div class="hud" id="hud" hidden>
+    <div class="hud-top">
+      <div class="lives" id="lives"></div>
+      <div class="timer" id="timer">0:45</div>
+    </div>
+    <div class="slots" id="slots" aria-live="polite"></div>
+  </div>
+
+  <!-- Start -->
+  <div class="overlay" id="startScreen">
+    <div class="card">
+      <div class="eyebrow">Grey-box prototype</div>
+      <h1>Catch &amp; Dodge</h1>
+      <p>Catch every letter to spell <strong class="phraseText">THEY KNOW</strong> before the clock runs out.</p>
+      <ul class="legend">
+        <li>
+          <svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><rect x="2" y="1" width="24" height="26" rx="5" fill="#f7f8fa" stroke="#1f2a37" stroke-width="2.5"/><text x="14" y="20" text-anchor="middle" font-family="Arial" font-weight="800" font-size="15" fill="#1f2a37">K</text></svg>
+          <span>Letters in the phrase</span><span>Catch</span>
+        </li>
+        <li>
+          <svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><rect x="2" y="1" width="24" height="26" rx="5" fill="#f7f8fa" stroke="#1f2a37" stroke-width="2.5"/><text x="14" y="20" text-anchor="middle" font-family="Arial" font-weight="800" font-size="15" fill="#1f2a37">Q</text></svg>
+          <span>Any other letter</span><span class="neg">−1 life</span>
+        </li>
+        <li>
+          <svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><polygon points="14,0 16.5,8 24,4 20,11.5 28,14 20,16.5 24,24 16.5,20 14,28 11.5,20 4,24 8,16.5 0,14 8,11.5 4,4 11.5,8" fill="#d64933"/></svg>
+          <span>Spikes</span><span class="neg">−1 life</span>
+        </li>
+      </ul>
+      <p>Miss a letter and it'll come round again.</p>
+      <button class="btn" id="playBtn" type="button">Play</button>
+      <div class="keys">Drag, tap or use ← → keys</div>
+    </div>
+  </div>
+
+  <!-- Win -->
+  <div class="overlay" id="winScreen" hidden>
+    <div class="card">
+      <div class="eyebrow">Spelled it in <span id="winTime">0</span>s</div>
+      <div class="phrase-big phraseText">THEY KNOW</div>
+      <h2>10% off is yours</h2>
+      <div id="winFormWrap">
+        <form id="winForm" novalidate>
+          <p>Pop your email in and we'll send your code.</p>
+          <label class="eyebrow" for="email">Email</label>
+          <input class="input" id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com">
+          <div class="err" id="emailErr" hidden></div>
+          <button class="btn" id="sendBtn" type="submit">Send my code</button>
+        </form>
+      </div>
+      <div id="winDone" hidden>
+        <p><strong>Code on its way.</strong> Check your inbox in the next minute or two.</p>
+      </div>
+      <div class="note" id="protoNote">Prototype: Klaviyo is off, so no email is sent. Switch it on in CONFIG.reward.klaviyo.</div>
+      <button class="btn ghost" id="againWin" type="button">Play again</button>
+    </div>
+  </div>
+
+  <!-- Lose -->
+  <div class="overlay" id="loseScreen" hidden>
+    <div class="card">
+      <div class="eyebrow" id="loseReason">Time's up</div>
+      <div class="big"><span id="loseGot">0</span> / <span id="loseTotal">8</span></div>
+      <h2 id="loseHead">So close</h2>
+      <p id="loseCopy">Letters caught. Have another go.</p>
+      <button class="btn" id="againLose" type="button">Go again</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* =========================================================
+   CONFIG: everything a client build would change lives here
+   ========================================================= */
+const CONFIG = {
+  phrase: 'THEY KNOW',            // letters to collect (spaces are just visual gaps)
+  durationSec: 45,
+  lives: 3,
+  spawnEvery: { start: 0.9, end: 0.4 },   // seconds between drops, eases over the run
+  fallSpeed:  { start: 0.28, end: 0.55 }, // screen heights per second
+  letterEvery: 2.2,               // a needed letter is guaranteed at least this often (seconds)
+  mix: { letter: 0.42, decoy: 0.26, spike: 0.32 },  // chance of each drop type
+  decoysRamp: 0.8,                // wrong letters get this much more common by the end
+  tile: { paper: '#f7f8fa', ink: '#1f2a37', size: 40 },
+  spike: { colour: '#d64933', size: 32 },
+  catcher: { colour: '#1f2a37', widthFrac: 0.24, min: 84, max: 140 },
+  reward: {
+    klaviyo: {
+      enabled: false,
+      companyId: 'YOUR_PUBLIC_API_KEY',   // Klaviyo public (site) key, safe to expose
+      listId: 'YOUR_LIST_ID'
+    }
+  }
+};
+
+/* ---------- helpers ---------- */
+const $ = id => document.getElementById(id);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const rand = (a, b) => a + Math.random() * (b - a);
+const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const PHRASE = CONFIG.phrase.toUpperCase();
+const NEEDED = [...new Set(PHRASE.replace(/[^A-Z]/g, '').split(''))];
+const DECOYS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').filter(c => !NEEDED.includes(c));
+
+const stage = $('stage'), cv = $('cv'), ctx = cv.getContext('2d');
+let W = 0, H = 0, DPR = 1, U = 1;
+
+const S = {
+  state: 'idle', t: 0, lives: CONFIG.lives, got: new Set(),
+  items: [], parts: [], texts: [], spawnIn: 0, sinceLetter: 0,
+  cx: 0, tx: 0, shake: 0, keys: { l: false, r: false }
+};
+
+/* ---------- sizing ---------- */
+function resize() {
+  const r = stage.getBoundingClientRect();
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = r.width; H = r.height;
+  U = Math.min(W, 520) / 400;
+  cv.width = Math.round(W * DPR);
+  cv.height = Math.round(H * DPR);
+  cv.style.width = W + 'px';
+  cv.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  if (!S.cx) { S.cx = S.tx = W / 2; }
+  const half = catcherW() / 2;
+  S.cx = clamp(S.cx, half, W - half);
+  S.tx = clamp(S.tx, half, W - half);
+}
+new ResizeObserver(resize).observe(stage);
+
+function catcherW() { const c = CONFIG.catcher; return clamp(W * c.widthFrac, c.min, c.max); }
+function trayTop() { return H - 56 * U - 18; }
+
+/* ---------- input ---------- */
+function pointerTo(e) {
+  const r = cv.getBoundingClientRect();
+  const half = catcherW() / 2;
+  S.tx = clamp(e.clientX - r.left, half, W - half);
+}
+cv.addEventListener('pointerdown', e => { cv.setPointerCapture(e.pointerId); pointerTo(e); });
+cv.addEventListener('pointermove', e => { if (e.pointerType === 'mouse' || e.buttons) pointerTo(e); });
+window.addEventListener('keydown', e => {
+  if (e.key === 'ArrowLeft' || e.key === 'a') { S.keys.l = true; e.preventDefault(); }
+  if (e.key === 'ArrowRight' || e.key === 'd') { S.keys.r = true; e.preventDefault(); }
+});
+window.addEventListener('keyup', e => {
+  if (e.key === 'ArrowLeft' || e.key === 'a') S.keys.l = false;
+  if (e.key === 'ArrowRight' || e.key === 'd') S.keys.r = false;
+});
+
+/* ---------- game flow ---------- */
+function show(id) {
+  ['startScreen', 'winScreen', 'loseScreen'].forEach(s => $(s).hidden = s !== id);
+}
+
+function start() {
+  Object.assign(S, {
+    state: 'play', t: 0, lives: CONFIG.lives, got: new Set(),
+    items: [], parts: [], texts: [], spawnIn: 0.5, sinceLetter: 1.2, shake: 0
+  });
+  $('hud').hidden = false;
+  renderSlots();
+  renderLives();
+  updateHud();
+  show(null);
+}
+
+function end(reason) {
+  S.state = 'over';
+  const won = S.got.size === NEEDED.length;
+  if (won) {
+    $('winTime').textContent = Math.ceil(S.t);
+    $('winFormWrap').hidden = false;
+    $('winDone').hidden = true;
+    $('emailErr').hidden = true;
+    $('protoNote').hidden = CONFIG.reward.klaviyo.enabled;
+    setTimeout(() => { show('winScreen'); onWin(S.t); }, 700);
+  } else {
+    const left = NEEDED.length - S.got.size;
+    $('loseGot').textContent = S.got.size;
+    $('loseTotal').textContent = NEEDED.length;
+    $('loseReason').textContent = reason === 'lives' ? 'Out of lives' : "Time's up";
+    $('loseHead').textContent = left <= 2 ? 'So close' : 'Not this time';
+    const missing = NEEDED.filter(c => !S.got.has(c)).join(', ');
+    $('loseCopy').textContent = `Letters caught. You were missing ${missing}.`;
+    show('loseScreen');
+  }
+}
+
+// Hook for analytics (GA4, Meta, Klaviyo events). Fires once per win.
+function onWin(seconds) {
+  window.dataLayer && window.dataLayer.push({ event: 'game_win', game_time: Math.ceil(seconds) });
+}
+
+/* ---------- spawning ---------- */
+function remainingLetters() {
+  const falling = new Set(S.items.filter(i => i.kind === 'letter').map(i => i.char));
+  const left = NEEDED.filter(c => !S.got.has(c));
+  const notFalling = left.filter(c => !falling.has(c));
+  return notFalling.length ? notFalling : left;
+}
+
+function spawn(p, forceLetter) {
+  let kind;
+  if (forceLetter) kind = 'letter';
+  else {
+    const m = CONFIG.mix;
+    const decoy = m.decoy * (1 + CONFIG.decoysRamp * p);
+    let r = Math.random() * (m.letter + decoy + m.spike);
+    kind = (r -= m.letter) < 0 ? 'letter' : (r -= decoy) < 0 ? 'decoy' : 'spike';
+  }
+  if (kind === 'letter' && !remainingLetters().length) kind = 'decoy';
+
+  const size = kind === 'spike' ? CONFIG.spike.size : CONFIG.tile.size;
+  const r = size * U / 2 + 2;
+  S.items.push({
+    kind,
+    char: kind === 'letter' ? pick(remainingLetters()) : kind === 'decoy' ? pick(DECOYS) : null,
+    r,
+    x: rand(r + 8, W - r - 8),
+    y: -r,
+    vy: H * lerp(CONFIG.fallSpeed.start, CONFIG.fallSpeed.end, p) * rand(0.88, 1.12),
+    vx: rand(-12, 12) * U,
+    rot: kind === 'spike' ? rand(0, Math.PI * 2) : rand(-0.25, 0.25),
+    vr: kind === 'spike' ? rand(-2.5, 2.5) : rand(-0.6, 0.6),
+    done: false
+  });
+  if (kind === 'letter') S.sinceLetter = 0;
+}
+
+/* ---------- effects ---------- */
+function burst(x, y, colour, n) {
+  for (let i = 0; i < n; i++) {
+    const a = rand(0, Math.PI * 2), sp = rand(60, 220) * U;
+    S.parts.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 80 * U, life: rand(0.35, 0.6), max: 0.6, colour, s: rand(2, 4.5) * U });
+  }
+}
+function floatText(x, y, text, colour) { S.texts.push({ x, y, text, colour, life: 0.8 }); }
+
+/* ---------- update ---------- */
+function update(dt) {
+  S.t += dt;
+  const p = Math.min(S.t / CONFIG.durationSec, 1);
+
+  // move catcher
+  const half = catcherW() / 2;
+  if (S.keys.l) S.tx -= W * 1.5 * dt;
+  if (S.keys.r) S.tx += W * 1.5 * dt;
+  S.tx = clamp(S.tx, half, W - half);
+  S.cx += (S.tx - S.cx) * Math.min(1, dt * 20);
+
+  // spawn
+  S.spawnIn -= dt;
+  S.sinceLetter += dt;
+  if (S.spawnIn <= 0) {
+    spawn(p, S.sinceLetter >= CONFIG.letterEvery);
+    S.spawnIn = lerp(CONFIG.spawnEvery.start, CONFIG.spawnEvery.end, p) * rand(0.7, 1.3);
+  }
+
+  // items
+  const top = trayTop();
+  for (const it of S.items) {
+    it.y += it.vy * dt;
+    it.x = clamp(it.x + it.vx * dt, it.r, W - it.r);
+    it.rot += it.vr * dt;
+    if (it.kind !== 'spike') it.rot = clamp(it.rot, -0.3, 0.3);
+
+    if (!it.done && it.y + it.r >= top && it.y - it.r <= top + 16 * U && Math.abs(it.x - S.cx) <= half + it.r * 0.5) {
+      it.done = true;
+      catchItem(it);
+      if (S.state !== 'play') return;
+    } else if (!it.done && it.y - it.r > H) {
+      it.done = true;
+    }
+  }
+  S.items = S.items.filter(it => !it.done);
+
+  // particles + text
+  for (const pt of S.parts) { pt.life -= dt; pt.x += pt.vx * dt; pt.y += pt.vy * dt; pt.vy += 520 * U * dt; }
+  S.parts = S.parts.filter(pt => pt.life > 0);
+  for (const tx of S.texts) { tx.life -= dt; tx.y -= 50 * U * dt; }
+  S.texts = S.texts.filter(tx => tx.life > 0);
+  S.shake = Math.max(0, S.shake - dt);
+
+  updateHud();
+  if (S.t >= CONFIG.durationSec) end('time');
+}
+
+function catchItem(it) {
+  const top = trayTop();
+  if (it.kind === 'letter') {
+    const fresh = !S.got.has(it.char);
+    S.got.add(it.char);
+    burst(it.x, top, CONFIG.tile.ink, 14);
+    floatText(it.x, top - 18 * U, fresh ? it.char : `${it.char} again`, CONFIG.tile.ink);
+    renderSlots(it.char);
+    if (S.got.size === NEEDED.length) {
+      burst(W / 2, H * 0.35, '#2f9e6e', 40);
+      end('win');
+    }
+  } else {
+    S.lives -= 1;
+    renderLives();
+    S.shake = reduceMotion ? 0 : 0.3;
+    burst(it.x, top, CONFIG.spike.colour, 18);
+    floatText(it.x, top - 18 * U, it.kind === 'decoy' ? `Not ${it.char}` : '−1 life', CONFIG.spike.colour);
+    if (S.lives <= 0) end('lives');
+  }
+}
+
+/* ---------- HUD ---------- */
+function renderSlots(justGot) {
+  const wrap = $('slots');
+  wrap.innerHTML = '';
+  for (const ch of PHRASE) {
+    const d = document.createElement('span');
+    if (ch === ' ') { d.className = 'slot gap'; wrap.appendChild(d); continue; }
+    const got = S.got.has(ch);
+    d.className = 'slot' + (got ? ' got' : '');
+    if (got && ch !== justGot) d.style.animation = 'none';
+    d.textContent = ch;
+    wrap.appendChild(d);
+  }
+  wrap.classList.toggle('done', S.got.size === NEEDED.length);
+}
+function renderLives() {
+  const wrap = $('lives');
+  wrap.innerHTML = '';
+  for (let i = 0; i < CONFIG.lives; i++) {
+    const d = document.createElement('span');
+    d.className = 'life' + (i >= S.lives ? ' lost' : '');
+    wrap.appendChild(d);
+  }
+}
+function updateHud() {
+  const left = Math.max(0, Math.ceil(CONFIG.durationSec - S.t));
+  $('timer').textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+}
+
+/* ---------- drawing ---------- */
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function drawTile(it) {
+  const s = it.r * 2 - 4, h = s * 1.1;
+  roundRect(-s / 2, -h / 2, s, h, 7 * U);
+  ctx.fillStyle = CONFIG.tile.paper;
+  ctx.fill();
+  ctx.lineWidth = 3 * U;
+  ctx.strokeStyle = CONFIG.tile.ink;
+  ctx.stroke();
+  ctx.fillStyle = CONFIG.tile.ink;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = `800 ${Math.round(s * 0.62)}px "Bricolage Grotesque", Arial, sans-serif`;
+  ctx.fillText(it.char, 0, h * 0.04);
+}
+
+function drawSpike(r) {
+  ctx.fillStyle = CONFIG.spike.colour;
+  ctx.beginPath();
+  for (let i = 0; i < 16; i++) {
+    const a = i * Math.PI / 8, rr = i % 2 ? r * 0.55 : r;
+    ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+  }
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,0.18)';
+  ctx.beginPath(); ctx.arc(0, 0, r * 0.28, 0, Math.PI * 2); ctx.fill();
+}
+
+function drawCatcher() {
+  const w = catcherW(), top = trayTop(), h = 22 * U, x = S.cx;
+  ctx.fillStyle = CONFIG.catcher.colour;
+  ctx.beginPath();
+  ctx.moveTo(x - w / 2, top);
+  ctx.lineTo(x + w / 2, top);
+  ctx.lineTo(x + w / 2 - 10 * U, top + h);
+  ctx.lineTo(x - w / 2 + 10 * U, top + h);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillRect(x - w / 2 - 4 * U, top - 4 * U, w + 8 * U, 6 * U);
+  ctx.fillStyle = 'rgba(31,42,55,0.12)';
+  ctx.beginPath();
+  ctx.ellipse(x, H - 18 - 12 * U, w * 0.42, 5 * U, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  ctx.save();
+  if (S.shake > 0) ctx.translate(rand(-6, 6) * S.shake * 3, rand(-4, 4) * S.shake * 3);
+
+  ctx.fillStyle = 'rgba(31,42,55,0.14)';
+  ctx.fillRect(0, H - 18 - 12 * U, W, 1);
+
+  for (const it of S.items) {
+    ctx.save();
+    ctx.translate(it.x, it.y);
+    ctx.rotate(it.rot);
+    if (it.kind === 'spike') drawSpike(it.r); else drawTile(it);
+    ctx.restore();
+  }
+
+  drawCatcher();
+
+  for (const pt of S.parts) {
+    ctx.globalAlpha = clamp(pt.life / pt.max, 0, 1);
+    ctx.fillStyle = pt.colour;
+    ctx.fillRect(pt.x - pt.s / 2, pt.y - pt.s / 2, pt.s, pt.s);
+  }
+  ctx.globalAlpha = 1;
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.font = `700 ${Math.round(16 * U)}px "JetBrains Mono", ui-monospace, monospace`;
+  for (const tx of S.texts) {
+    ctx.globalAlpha = clamp(tx.life / 0.8, 0, 1);
+    ctx.fillStyle = tx.colour;
+    ctx.fillText(tx.text, tx.x, tx.y);
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
+let last = 0;
+function frame(ts) {
+  const dt = last ? Math.min((ts - last) / 1000, 0.05) : 0;
+  last = ts;
+  if (S.state === 'play') update(dt);
+  draw();
+  requestAnimationFrame(frame);
+}
+
+/* ---------- Klaviyo ---------- */
+async function sendToKlaviyo(email) {
+  const k = CONFIG.reward.klaviyo;
+  if (!k.enabled) return { ok: true, simulated: true };
+  const res = await fetch(`https://a.klaviyo.com/client/subscriptions/?company_id=${encodeURIComponent(k.companyId)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/vnd.api+json', revision: '2024-10-15' },
+    body: JSON.stringify({
+      data: {
+        type: 'subscription',
+        attributes: {
+          custom_source: 'Catch & Dodge game',
+          profile: { data: { type: 'profile', attributes: { email, properties: { game_won: true, game_time: Math.ceil(S.t) } } } }
+        },
+        relationships: { list: { data: { type: 'list', id: k.listId } } }
+      }
+    })
+  });
+  return { ok: res.ok };
+}
+
+$('winForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const email = $('email').value.trim();
+  const err = $('emailErr');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    err.textContent = 'That email looks off. Check it and try again.';
+    err.hidden = false;
+    return;
+  }
+  err.hidden = true;
+  const btn = $('sendBtn');
+  btn.disabled = true; btn.textContent = 'Sending…';
+  try {
+    const r = await sendToKlaviyo(email);
+    if (!r.ok) throw new Error('bad response');
+    $('winFormWrap').hidden = true;
+    $('winDone').hidden = false;
+  } catch (_) {
+    err.textContent = "Couldn't send that just now. Try again in a moment.";
+    err.hidden = false;
+  } finally {
+    btn.disabled = false; btn.textContent = 'Send my code';
+  }
+});
+
+/* ---------- boot ---------- */
+document.querySelectorAll('.phraseText').forEach(el => el.textContent = PHRASE);
+$('playBtn').addEventListener('click', start);
+$('againWin').addEventListener('click', start);
+$('againLose').addEventListener('click', start);
+resize();
+renderSlots();
+renderLives();
+requestAnimationFrame(frame);
+</script>
